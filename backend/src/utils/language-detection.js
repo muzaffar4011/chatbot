@@ -39,6 +39,8 @@ export function detectLanguage(message) {
     /\b(what|when|where|who|why|how|is|are|was|were|do|does|did|can|could|will|would|should)\b/i,
     /\b(the|a|an|and|or|but|if|then|else|this|that|these|those)\b/i,
     /\b(please|thank|thanks|hello|hi|yes|no|ok|okay|sure|maybe)\b/i,
+    /\b(your|you|yourself|yours|you're|you've|you'll)\b/i,
+    /\b(name|location|address|price|cost|service|services|package|packages)\b/i,
   ];
 
   let englishScore = 0;
@@ -48,13 +50,18 @@ export function detectLanguage(message) {
     }
   }
 
-  // If more English patterns, return English
-  if (englishScore > urduScore) {
+  // If English patterns found and more than Urdu, return English
+  if (englishScore > 0 && englishScore >= urduScore) {
     return 'en';
   }
 
-  // Default based on score
-  return urduScore >= 1 ? 'ur' : 'en';
+  // If Urdu patterns found, return Urdu
+  if (urduScore >= 1) {
+    return 'ur';
+  }
+
+  // Default to English if no clear pattern
+  return 'en';
 }
 
 /**

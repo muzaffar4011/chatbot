@@ -69,13 +69,28 @@ chatRouter.post('/', async (req, res) => {
     // Detect language
     let detectedLanguage = detectLanguage(sanitizedMessage);
     
-    // If ambiguous, check conversation history
-    if (detectedLanguage === 'en' && session.conversationHistory.length > 0) {
+    // If ambiguous (very short message), check conversation history
+    // But prioritize current message language if it's clear
+    if (sanitizedMessage.length < 10 && session.conversationHistory.length > 0) {
       const historyLanguage = getLanguageFromHistory(session.conversationHistory);
-      if (historyLanguage === 'ur') {
-        detectedLanguage = 'ur';
+      // Only use history if current detection is uncertain
+      if (historyLanguage !== detectedLanguage) {
+        // Check if current message has clear language indicators
+        const hasEnglishWords = /\b(what|where|which|your|name|is|are|do|have|has)\b/i.test(sanitizedMessage);
+        const hasUrduWords = /\b(kya|kahan|kaun|kaunsi|apka|apke|mera|meri|hai|hain)\b/i.test(sanitizedMessage);
+        
+        if (hasEnglishWords && !hasUrduWords) {
+          detectedLanguage = 'en';
+        } else if (hasUrduWords && !hasEnglishWords) {
+          detectedLanguage = 'ur';
+        } else {
+          // Use history language if current is truly ambiguous
+          detectedLanguage = historyLanguage;
+        }
       }
     }
+    
+    console.log(`🌐 Detected language: ${detectedLanguage} for query: "${sanitizedMessage.substring(0, 50)}"`);
 
     // Add user message to history
     session.conversationHistory.push({
