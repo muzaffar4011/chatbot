@@ -35,12 +35,18 @@ export function detectLanguage(message) {
   }
 
   // Check for English patterns (common English words)
+  // More comprehensive English detection
   const englishPatterns = [
-    /\b(what|when|where|who|why|how|is|are|was|were|do|does|did|can|could|will|would|should)\b/i,
-    /\b(the|a|an|and|or|but|if|then|else|this|that|these|those)\b/i,
-    /\b(please|thank|thanks|hello|hi|yes|no|ok|okay|sure|maybe)\b/i,
-    /\b(your|you|yourself|yours|you're|you've|you'll)\b/i,
-    /\b(name|location|address|price|cost|service|services|package|packages)\b/i,
+    // Question words
+    /\b(what|when|where|who|why|how|which|whose|whom)\b/i,
+    // Verbs
+    /\b(is|are|was|were|am|be|been|being|do|does|did|done|have|has|had|will|would|should|could|can|may|might|must|shall)\b/i,
+    // Pronouns and determiners
+    /\b(the|a|an|and|or|but|if|then|else|this|that|these|those|they|them|their|there)\b/i,
+    // Common words
+    /\b(please|thank|thanks|hello|hi|yes|no|ok|okay|sure|maybe|you|your|yours|yourself|you're|you've|you'll)\b/i,
+    // Salon-related English words
+    /\b(name|location|address|price|cost|service|services|package|packages|provide|provides|offer|offers|have|has|get|got)\b/i,
   ];
 
   let englishScore = 0;
@@ -50,7 +56,15 @@ export function detectLanguage(message) {
     }
   }
 
-  // If English patterns found and more than Urdu, return English
+  // Strong English indicators - if found, prioritize English
+  const strongEnglishIndicators = /\b(which|what|where|who|why|how|you|your|provide|offers|packages|services)\b/i.test(text);
+  
+  // If strong English indicators found, return English immediately
+  if (strongEnglishIndicators && englishScore > 0) {
+    return 'en';
+  }
+
+  // If English patterns found and more than or equal to Urdu, return English
   if (englishScore > 0 && englishScore >= urduScore) {
     return 'en';
   }

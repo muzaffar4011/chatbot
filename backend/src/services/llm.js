@@ -34,20 +34,31 @@ export async function* generateStreamingResponse(
   // Build messages array - include conversation history for context
   // The system prompt includes history as text for reference, but we also pass actual messages
   // This helps the LLM understand the conversation flow better
+  const languageName = language === 'ur' ? 'Roman Urdu' : 'English';
   const systemContent = systemPrompt
     .replace('{retrieved_chunks}', contextText)
     .replace('{conversation_history}', formatConversationHistory(conversationHistory))
     .replace('{user_query}', userQuery)
-    .replace('{detected_language}', language === 'ur' ? 'Roman Urdu' : 'English');
+    .replace('{detected_language}', languageName);
 
   // Build messages array with conversation history
   // Include last 8 messages (4 pairs) to maintain context while keeping token count reasonable
   const recentHistory = conversationHistory.slice(-8);
   
+  // Add explicit language instruction as first user message to reinforce
+  const languageInstruction = language === 'ur' 
+    ? 'IMPORTANT: User ne Roman Urdu me sawal poocha hai. Aap ko SIRF Roman Urdu me jawab dena hai. English words bilkul use mat karo.'
+    : 'IMPORTANT: User asked in English. You MUST respond ONLY in English. Do NOT use any Roman Urdu words or phrases.';
+  
   const messages = [
     {
       role: 'system',
       content: systemContent
+    },
+    // Add explicit language instruction
+    {
+      role: 'user',
+      content: languageInstruction
     },
     // Include conversation history as actual messages for better context understanding
     ...recentHistory,
@@ -59,6 +70,7 @@ export async function* generateStreamingResponse(
   
   // Debug: Log conversation history length
   console.log(`📝 Conversation history: ${conversationHistory.length} messages, using last ${recentHistory.length} for context`);
+  console.log(`🌐 Language instruction: ${languageInstruction.substring(0, 80)}...`);
 
   try {
     const response = await axios.post(
@@ -168,14 +180,21 @@ PERSONALITY:
 
 CRITICAL LANGUAGE RULES (MUST FOLLOW STRICTLY):
 ⚠️ **ABSOLUTELY NO LANGUAGE MIXING ALLOWED** ⚠️
+🚫 **THIS IS THE MOST IMPORTANT RULE - VIOLATION IS NOT ACCEPTABLE** 🚫
 
-1. **STRICT LANGUAGE CONSISTENCY**:
-   - If DETECTED LANGUAGE is "English" → Respond ONLY in English. Do NOT use ANY Roman Urdu words, phrases, or sentences.
-   - If DETECTED LANGUAGE is "Roman Urdu" → Respond ONLY in Roman Urdu. Do NOT use ANY English words, phrases, or sentences.
-   - NEVER mix languages in the same response
-   - NEVER use phrases like "Aap Google Maps use karke" (mixing Roman Urdu with English)
-   - If detected language is English, use ONLY English: "You can use Google Maps to find us"
-   - If detected language is Roman Urdu, use ONLY Roman Urdu: "Aap Google Maps use karke hume find kar sakte hain"
+1. **STRICT LANGUAGE CONSISTENCY - MANDATORY**:
+   - If DETECTED LANGUAGE is "English" → Respond ONLY in English. Do NOT use ANY Roman Urdu words, phrases, or sentences. ZERO tolerance for mixing.
+   - If DETECTED LANGUAGE is "Roman Urdu" → Respond ONLY in Roman Urdu. Do NOT use ANY English words, phrases, or sentences. ZERO tolerance for mixing.
+   - NEVER mix languages in the same response - EVER
+   - NEVER use phrases like "Aap Google Maps use karke" (this is WRONG - mixing Roman Urdu with English)
+   - CORRECT English example: "You can use Google Maps to find us"
+   - CORRECT Roman Urdu example: "Aap Google Maps use karke hume find kar sakte hain"
+   - WRONG examples (DO NOT DO THIS):
+     * "Our salon is located... Aap Google Maps use karke..." ❌ (MIXED - WRONG)
+     * "Hum do bridal packages offer karte hain" ❌ (MIXED - WRONG)
+   - CORRECT examples:
+     * English: "We offer two bridal packages" ✅
+     * Roman Urdu: "Hum do bridal packages offer karte hain" ✅ (if ALL in Roman Urdu)
 
 2. **Language-Specific Phrases**:
    - English ONLY: "Absolutely!", "Of course!", "Sure thing!", "How can I help?", "What can I do for you?"
@@ -221,14 +240,17 @@ CURRENT USER QUESTION: {user_query}
 
 DETECTED LANGUAGE: {detected_language}
 
-⚠️ FINAL REMINDER:
+⚠️ FINAL REMINDER - READ THIS CAREFULLY:
 - DETECTED LANGUAGE is "{detected_language}"
 - You MUST respond ONLY in {detected_language}
-- If {detected_language} is "English", use ZERO Roman Urdu words
-- If {detected_language} is "Roman Urdu", use ZERO English words
-- NO EXCEPTIONS - NO MIXING ALLOWED
+- If {detected_language} is "English", use ZERO Roman Urdu words - NOT EVEN ONE WORD
+- If {detected_language} is "Roman Urdu", use ZERO English words - NOT EVEN ONE WORD
+- NO EXCEPTIONS - NO MIXING ALLOWED - THIS IS MANDATORY
+- Example: If user asks "which packages you provide?" (English), respond: "We offer two bridal packages..." (ALL English)
+- Example: If user asks "kaun se packages hain?" (Roman Urdu), respond: "Hum do bridal packages offer karte hain..." (ALL Roman Urdu)
 - Use the conversation history to understand context and answer follow-up questions
 - Combine information from both the knowledge base context AND the conversation history
-- Respond naturally, accurately, and with enthusiasm. Be friendly and helpful like a good friend would be!`;
+- Respond naturally, accurately, and with enthusiasm. Be friendly and helpful like a good friend would be!
+- REMEMBER: Language consistency is MORE IMPORTANT than anything else. Do NOT mix languages!`;
 }
 

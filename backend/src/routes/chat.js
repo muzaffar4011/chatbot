@@ -66,27 +66,25 @@ chatRouter.post('/', async (req, res) => {
     // Sanitize input
     const sanitizedMessage = sanitizeInput(message.trim());
 
-    // Detect language
+    // Detect language - ALWAYS prioritize current message
     let detectedLanguage = detectLanguage(sanitizedMessage);
     
-    // If ambiguous (very short message), check conversation history
-    // But prioritize current message language if it's clear
-    if (sanitizedMessage.length < 10 && session.conversationHistory.length > 0) {
+    // Check for strong language indicators in current message
+    const hasStrongEnglish = /\b(which|what|where|who|why|how|you|your|provide|offers|packages|services|name|location|price)\b/i.test(sanitizedMessage);
+    const hasStrongUrdu = /\b(kya|kahan|kaun|kaunsi|kaunse|apka|apke|apki|mera|meri|mere|hamara|hamari|hamare|hai|hain|ho|hoon)\b/i.test(sanitizedMessage);
+    
+    // If current message has strong language indicators, use them (override history)
+    if (hasStrongEnglish && !hasStrongUrdu) {
+      detectedLanguage = 'en';
+    } else if (hasStrongUrdu && !hasStrongEnglish) {
+      detectedLanguage = 'ur';
+    }
+    // Only check history if current message is truly ambiguous (very short, no clear indicators)
+    else if (sanitizedMessage.length < 15 && !hasStrongEnglish && !hasStrongUrdu && session.conversationHistory.length > 0) {
       const historyLanguage = getLanguageFromHistory(session.conversationHistory);
-      // Only use history if current detection is uncertain
+      // Only use history if it's different and current is truly ambiguous
       if (historyLanguage !== detectedLanguage) {
-        // Check if current message has clear language indicators
-        const hasEnglishWords = /\b(what|where|which|your|name|is|are|do|have|has)\b/i.test(sanitizedMessage);
-        const hasUrduWords = /\b(kya|kahan|kaun|kaunsi|apka|apke|mera|meri|hai|hain)\b/i.test(sanitizedMessage);
-        
-        if (hasEnglishWords && !hasUrduWords) {
-          detectedLanguage = 'en';
-        } else if (hasUrduWords && !hasEnglishWords) {
-          detectedLanguage = 'ur';
-        } else {
-          // Use history language if current is truly ambiguous
-          detectedLanguage = historyLanguage;
-        }
+        detectedLanguage = historyLanguage;
       }
     }
     
