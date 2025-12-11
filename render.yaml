@@ -1,8 +1,10 @@
 services:
   - type: web
     name: salon-rag-backend
-    env: node
-    rootDir: backend
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: ./backend
     buildCommand: npm install
     startCommand: npm start
     envVars:
@@ -10,6 +12,8 @@ services:
         value: production
       - key: PORT
         value: 3001
+      - key: FRONTEND_URL
+        value: https://saloon-bot.vercel.app
       # Add your other environment variables in Render dashboard:
       # OPENROUTER_API_KEY
       # OPENROUTER_BASE_URL
@@ -19,5 +23,4 @@ services:
       # SALON_LOCATION
       # SALON_PHONE
       # SALON_WHATSAPP
-      # FRONTEND_URL
 
