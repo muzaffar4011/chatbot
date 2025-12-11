@@ -21,16 +21,23 @@ export function detectLanguage(message) {
     /\b(na|nahi|nahin|mat|kabhi|hamesha|sabse|bahut|zyada|kam|accha|bura)\b/i,
   ];
 
-  // Count matches
+  // Count matches - give more weight to Roman Urdu patterns
   let urduScore = 0;
+  let urduWordCount = 0;
   for (const pattern of romanUrduPatterns) {
     if (pattern.test(text)) {
       urduScore++;
+      // Count actual matches (more weight)
+      const matches = text.match(pattern);
+      if (matches) urduWordCount += matches.length;
     }
   }
 
-  // If 2+ patterns match, likely Roman Urdu
-  if (urduScore >= 2) {
+  // Strong Roman Urdu indicators (high priority)
+  const strongUrduIndicators = /\b(apke|apka|apki|apne|mera|meri|mere|hamara|hamari|hamare|kaun|kaunsi|kaunse|kon|konsi|konse|kya|kahan|kaise|kyun|mujhe|tumhe|hame|hen|hain|hai|ho|hoon|hoga|hogi)\b/i.test(text);
+  
+  // If strong Roman Urdu indicators found AND multiple Urdu words, prioritize Urdu
+  if (strongUrduIndicators && urduScore >= 2) {
     return 'ur';
   }
 
@@ -45,31 +52,50 @@ export function detectLanguage(message) {
     /\b(the|a|an|and|or|but|if|then|else|this|that|these|those|they|them|their|there)\b/i,
     // Common words
     /\b(please|thank|thanks|hello|hi|yes|no|ok|okay|sure|maybe|you|your|yours|yourself|you're|you've|you'll)\b/i,
-    // Salon-related English words
-    /\b(name|location|address|price|cost|service|services|package|packages|provide|provides|offer|offers|have|has|get|got)\b/i,
+    
   ];
 
   let englishScore = 0;
+  let englishWordCount = 0;
   for (const pattern of englishPatterns) {
     if (pattern.test(text)) {
       englishScore++;
+      const matches = text.match(pattern);
+      if (matches) englishWordCount += matches.length;
     }
   }
 
-  // Strong English indicators - if found, prioritize English
-  const strongEnglishIndicators = /\b(which|what|where|who|why|how|you|your|provide|offers|packages|services)\b/i.test(text);
+  // Strong English indicators - but only if sentence structure is English
+  const strongEnglishQuestionWords = /\b(which|what|where|who|why|how)\b/i.test(text);
+  const strongEnglishStructure = /\b(you|your|provide|offers)\b/i.test(text);
   
-  // If strong English indicators found, return English immediately
-  if (strongEnglishIndicators && englishScore > 0) {
+  // If strong English question words found AND sentence structure is English (not Roman Urdu structure)
+  // Roman Urdu structure: "apke pass kon kon si services hen" - has "apke", "kon", "hen"
+  // English structure: "which services you provide" - has "which", "you", "provide"
+  const hasUrduStructure = /\b(apke|apka|apki|mera|meri|mere|hamara|hamari|hamare|kaun|kaunsi|kaunse|kon|konsi|konse|mujhe|tumhe|hame)\b/i.test(text);
+  const hasUrduVerb = /\b(hen|hain|hai|ho|hoon|hoga|hogi|honge)\b/i.test(text);
+  
+  // If sentence has Roman Urdu structure (apke/mera/hamara + kon/kaun + hen/hain), prioritize Urdu
+  if (hasUrduStructure && (hasUrduVerb || urduScore >= 2)) {
+    return 'ur';
+  }
+  
+  // If strong English question words AND English structure (not Urdu structure), return English
+  if (strongEnglishQuestionWords && strongEnglishStructure && !hasUrduStructure) {
     return 'en';
   }
 
-  // If English patterns found and more than or equal to Urdu, return English
-  if (englishScore > 0 && englishScore >= urduScore) {
+  // Compare word counts - if more Urdu words than English, prioritize Urdu
+  if (urduWordCount > englishWordCount && urduScore >= 1) {
+    return 'ur';
+  }
+
+  // If English patterns found and more than Urdu, return English
+  if (englishWordCount > urduWordCount && englishScore > 0) {
     return 'en';
   }
 
-  // If Urdu patterns found, return Urdu
+  // If Urdu patterns found (even if equal), prioritize Urdu (Roman Urdu often mixes English words)
   if (urduScore >= 1) {
     return 'ur';
   }

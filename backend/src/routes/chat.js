@@ -70,14 +70,25 @@ chatRouter.post('/', async (req, res) => {
     let detectedLanguage = detectLanguage(sanitizedMessage);
     
     // Check for strong language indicators in current message
-    const hasStrongEnglish = /\b(which|what|where|who|why|how|you|your|provide|offers|packages|services|name|location|price)\b/i.test(sanitizedMessage);
-    const hasStrongUrdu = /\b(kya|kahan|kaun|kaunsi|kaunse|apka|apke|apki|mera|meri|mere|hamara|hamari|hamare|hai|hain|ho|hoon)\b/i.test(sanitizedMessage);
+    // Roman Urdu structure indicators (high priority)
+    const hasUrduStructure = /\b(apke|apka|apki|apne|mera|meri|mere|hamara|hamari|hamare|kaun|kaunsi|kaunse|kon|konsi|konse|mujhe|tumhe|hame)\b/i.test(sanitizedMessage);
+    const hasUrduVerb = /\b(hen|hain|hai|ho|hoon|hoga|hogi|honge|hota|hoti|hote)\b/i.test(sanitizedMessage);
+    const hasUrduQuestion = /\b(kya|kahan|kaise|kyun|kab|kis|kisi|kuch)\b/i.test(sanitizedMessage);
     
-    // If current message has strong language indicators, use them (override history)
-    if (hasStrongEnglish && !hasStrongUrdu) {
-      detectedLanguage = 'en';
-    } else if (hasStrongUrdu && !hasStrongEnglish) {
+    // English structure indicators
+    const hasEnglishQuestion = /\b(which|what|where|who|why|how)\b/i.test(sanitizedMessage);
+    const hasEnglishStructure = /\b(you|your|provide|offers|is|are|do|does|have|has)\b/i.test(sanitizedMessage);
+    
+    // If Roman Urdu structure found (apke/mera + kon/kaun + hen/hain), prioritize Urdu
+    // This handles cases like "apke pass kon kon si services hen"
+    if ((hasUrduStructure || hasUrduQuestion) && (hasUrduVerb || hasUrduStructure)) {
       detectedLanguage = 'ur';
+      console.log(`✅ Detected Roman Urdu structure: ${sanitizedMessage}`);
+    }
+    // If English question word + English structure (not Urdu structure), use English
+    else if (hasEnglishQuestion && hasEnglishStructure && !hasUrduStructure) {
+      detectedLanguage = 'en';
+      console.log(`✅ Detected English structure: ${sanitizedMessage}`);
     }
     // Only check history if current message is truly ambiguous (very short, no clear indicators)
     else if (sanitizedMessage.length < 15 && !hasStrongEnglish && !hasStrongUrdu && session.conversationHistory.length > 0) {
