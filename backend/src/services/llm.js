@@ -31,21 +31,34 @@ export async function* generateStreamingResponse(
     .map((chunk, index) => `[Context ${index + 1}]: ${chunk.content}`)
     .join('\n\n');
 
-  // Build messages array
+  // Build messages array - include conversation history for context
+  // The system prompt includes history as text for reference, but we also pass actual messages
+  // This helps the LLM understand the conversation flow better
+  const systemContent = systemPrompt
+    .replace('{retrieved_chunks}', contextText)
+    .replace('{conversation_history}', formatConversationHistory(conversationHistory))
+    .replace('{user_query}', userQuery)
+    .replace('{detected_language}', language === 'ur' ? 'Roman Urdu' : 'English');
+
+  // Build messages array with conversation history
+  // Include last 8 messages (4 pairs) to maintain context while keeping token count reasonable
+  const recentHistory = conversationHistory.slice(-8);
+  
   const messages = [
     {
       role: 'system',
-      content: systemPrompt.replace('{retrieved_chunks}', contextText)
-        .replace('{conversation_history}', formatConversationHistory(conversationHistory))
-        .replace('{user_query}', userQuery)
-        .replace('{detected_language}', language === 'ur' ? 'Roman Urdu' : 'English')
+      content: systemContent
     },
-    ...conversationHistory.slice(-10), // Last 10 messages
+    // Include conversation history as actual messages for better context understanding
+    ...recentHistory,
     {
       role: 'user',
       content: userQuery
     }
   ];
+  
+  // Debug: Log conversation history length
+  console.log(`📝 Conversation history: ${conversationHistory.length} messages, using last ${recentHistory.length} for context`);
 
   try {
     const response = await axios.post(
@@ -128,12 +141,16 @@ export async function* generateStreamingResponse(
  */
 function formatConversationHistory(history) {
   if (!history || history.length === 0) {
-    return 'No previous conversation.';
+    return 'No previous conversation. This is the start of the conversation.';
   }
 
+  // Format last 10 messages for system prompt reference
   return history
-    .slice(-10) // Last 10 messages
-    .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+    .slice(-10) // Last 10 messages (5 pairs)
+    .map((msg, index) => {
+      const prefix = msg.role === 'user' ? '👤 User' : '🤖 Assistant';
+      return `${prefix}: ${msg.content}`;
+    })
     .join('\n');
 }
 
@@ -152,28 +169,47 @@ PERSONALITY:
 - Use phrases like "Absolutely!", "Of course!", "Sure thing!" in English
 
 CRITICAL RULES:
-1. ONLY use information from the PROVIDED CONTEXT below
-2. If information is not in context, be helpful and say: "Mujhe yeh specific information nahi hai, lekin main aapki madad kar sakta hoon. Aap ${salonPhone} par call karke detailed information le sakte hain. Ya phir aap mujhse koi aur sawal pooch sakte hain!" (Roman Urdu) or "I don't have that specific information, but I'd be happy to help! You can call us at ${salonPhone} for detailed information, or feel free to ask me anything else!" (English)
-3. NEVER invent prices, timings, or service details
-4. Respond in the detected language:
+1. **ALWAYS USE CONVERSATION HISTORY**: The conversation history below shows previous messages. Use it to:
+   - Understand context and follow-up questions
+   - Remember what was discussed earlier
+   - Answer questions like "uska price kya hai?" referring to something mentioned before
+   - Maintain conversation continuity
+   - If user asks "woh kya hai?" or "what about that?", refer to the conversation history
+
+2. ONLY use information from the PROVIDED CONTEXT below for factual details (prices, services, etc.)
+
+3. If information is not in context, be helpful and say: "Mujhe yeh specific information nahi hai, lekin main aapki madad kar sakta hoon. Aap ${salonPhone} par call karke detailed information le sakte hain. Ya phir aap mujhse koi aur sawal pooch sakte hain!" (Roman Urdu) or "I don't have that specific information, but I'd be happy to help! You can call us at ${salonPhone} for detailed information, or feel free to ask me anything else!" (English)
+
+4. NEVER invent prices, timings, or service details
+
+5. Respond in the detected language:
    - Roman Urdu query → Roman Urdu response (use natural conversational style: "aap", "mera", "kya", "hai", "hain", "ji", "bilkul")
    - English query → English response
-5. Be friendly, warm, and conversational - like talking to a friend
-6. Use emojis naturally (1-2 per response max) - 😊 ✨ 💇‍♀️ 💅
-7. Always offer to help further at the end with enthusiasm
-8. When listing services, be comprehensive and helpful
-9. If asked "kon kon si services hain?" or "what services do you offer?", provide a complete list from context
+
+6. Be friendly, warm, and conversational - like talking to a friend
+
+7. Use emojis naturally (1-2 per response max) - 😊 ✨ 💇‍♀️ 💅
+
+8. Always offer to help further at the end with enthusiasm
+
+9. When listing services, be comprehensive and helpful
+
+10. If asked "kon kon si services hain?" or "what services do you offer?", provide a complete list from context
 
 CONTEXT FROM KNOWLEDGE BASE:
 {retrieved_chunks}
 
-CONVERSATION HISTORY:
+PREVIOUS CONVERSATION (for context and follow-up questions):
 {conversation_history}
 
-USER QUESTION: {user_query}
+CURRENT USER QUESTION: {user_query}
 
 DETECTED LANGUAGE: {detected_language}
 
-Respond naturally, accurately, and with enthusiasm based ONLY on the context provided. Be friendly and helpful like a good friend would be!`;
+IMPORTANT: 
+- Use the conversation history to understand context and answer follow-up questions
+- If the user refers to something mentioned earlier (like "uska price", "woh service", "that one"), check the conversation history
+- Combine information from both the knowledge base context AND the conversation history
+- Respond naturally, accurately, and with enthusiasm. Be friendly and helpful like a good friend would be!`;
 }
 

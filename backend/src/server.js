@@ -23,20 +23,42 @@ initializeVectorDB().catch((error) => {
 
 // Security middleware
 app.use(helmet());
+
 // CORS configuration
-const allowedOrigins = process.env.FRONTEND_URL 
+// In development, always allow localhost. In production, use FRONTEND_URL
+const isDevelopment = process.env.NODE_ENV !== 'production';
+const productionOrigins = process.env.FRONTEND_URL 
   ? process.env.FRONTEND_URL.split(',').map(url => url.trim())
-  : ['http://localhost:5173', 'https://localhost:5173'];
+  : [];
+
+// Always include localhost for development
+const allowedOrigins = isDevelopment
+  ? ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173', ...productionOrigins]
+  : productionOrigins.length > 0 
+    ? productionOrigins 
+    : ['http://localhost:5173']; // Fallback if no FRONTEND_URL set
+
+console.log(`🌐 CORS allowed origins: ${allowedOrigins.join(', ')}`);
 
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
+    // In development, always allow localhost variants
+    if (isDevelopment && (
+      origin.startsWith('http://localhost:') || 
+      origin.startsWith('http://127.0.0.1:')
+    )) {
+      return callback(null, true);
+    }
+    
+    // Check if origin is in allowed list
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      console.log(`CORS blocked origin: ${origin}`);
+      console.log(`⚠️ CORS blocked origin: ${origin}`);
+      console.log(`   Allowed origins: ${allowedOrigins.join(', ')}`);
       callback(new Error('Not allowed by CORS'));
     }
   },

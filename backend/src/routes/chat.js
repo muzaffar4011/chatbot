@@ -3,6 +3,7 @@ import { detectLanguage, getLanguageFromHistory } from '../utils/language-detect
 import { generateEmbedding } from '../services/embeddings.js';
 import { searchSimilar } from '../services/vector-db.js';
 import { generateStreamingResponse, buildSystemPrompt } from '../services/llm.js';
+import { expandQuery, detectIntent } from '../utils/query-expansion.js';
 
 export const chatRouter = express.Router();
 
@@ -49,6 +50,9 @@ chatRouter.post('/', async (req, res) => {
   const sid = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const session = getSession(sid);
 
+  // Debug: Log session info
+  console.log(`💬 Session: ${sid}, History length: ${session.conversationHistory.length}, Message: ${message.substring(0, 50)}...`);
+
   // Rate limiting per session
   if (session.messageCount >= 20) {
     return res.status(429).json({ 
@@ -79,10 +83,18 @@ chatRouter.post('/', async (req, res) => {
       content: sanitizedMessage
     });
 
-    // Generate embedding for query
+    // Expand query with synonyms and context for better search
+    const expandedQuery = expandQuery(sanitizedMessage, session.conversationHistory.slice(0, -1));
+    const detectedIntent = detectIntent(sanitizedMessage);
+    
+    console.log(`🔍 Original query: "${sanitizedMessage}"`);
+    console.log(`🔍 Expanded query: "${expandedQuery}"`);
+    console.log(`🎯 Detected intent: ${detectedIntent}`);
+
+    // Generate embedding for expanded query (better semantic matching)
     let queryEmbedding;
     try {
-      queryEmbedding = await generateEmbedding(sanitizedMessage);
+      queryEmbedding = await generateEmbedding(expandedQuery);
     } catch (error) {
       console.error('Error generating embedding:', error);
       const errorMessage = detectedLanguage === 'ur'
@@ -92,9 +104,10 @@ chatRouter.post('/', async (req, res) => {
     }
 
     // Search vector database - get more results for better matching
+    // Increase limit to get more candidates, we'll filter and rank them
     let searchResults;
     try {
-      searchResults = await searchSimilar(queryEmbedding, 10); // Get top 10 for better matching
+      searchResults = await searchSimilar(queryEmbedding, 20); // Get top 20 for better matching
     } catch (error) {
       console.error('Error searching vector database:', error);
       const errorMessage = detectedLanguage === 'ur'
@@ -103,13 +116,19 @@ chatRouter.post('/', async (req, res) => {
       return res.status(500).json({ error: errorMessage });
     }
     
-    // Filter and rank results
+    // Filter and rank results with very lenient threshold
     // Qdrant returns similarity (0-1), we convert to distance (1 - similarity)
     // Lower distance = better match
-    // Be very lenient - accept almost all results (distance < 1.0 means similarity > 0.0)
+    // Use very lenient threshold - accept results with similarity > 0.05 (distance < 0.95)
+    // This means even very weak matches are considered to avoid missing relevant info
     const relevantChunks = searchResults
-      .filter(chunk => chunk.score < 1.0) // Very lenient - accept almost all results
-      .slice(0, 5); // Get top 5 chunks for better context
+      .filter(chunk => {
+        // Very lenient: accept if similarity > 0.05 (distance < 0.95)
+        // This means even very weak semantic matches are considered
+        const similarity = 1 - chunk.score;
+        return similarity > 0.05; // Accept even 5% similarity matches
+      })
+      .slice(0, 10); // Get top 10 chunks for maximum context coverage
 
     // Calculate average similarity (higher is better)
     // score is distance, so similarity = 1 - score
@@ -118,7 +137,15 @@ chatRouter.post('/', async (req, res) => {
       : 0;
 
     // Debug logging
-    console.log(`Search results: ${searchResults.length}, Relevant: ${relevantChunks.length}, Avg similarity: ${avgSimilarity.toFixed(2)}`);
+    console.log(`📊 Search: ${searchResults.length} total, ${relevantChunks.length} relevant, Avg similarity: ${avgSimilarity.toFixed(3)}`);
+    
+    // If no relevant chunks found, try with even more lenient threshold
+    if (relevantChunks.length === 0 && searchResults.length > 0) {
+      console.log(`⚠️ No relevant chunks with threshold 0.1, using all top results`);
+      // Accept all results, even with very low similarity
+      const allChunks = searchResults.slice(0, 5);
+      relevantChunks.push(...allChunks);
+    }
 
     // Build system prompt
     const systemPrompt = buildSystemPrompt(
