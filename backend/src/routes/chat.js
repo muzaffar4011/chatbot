@@ -91,7 +91,7 @@ chatRouter.post('/', async (req, res) => {
       console.log(`✅ Detected English structure: ${sanitizedMessage}`);
     }
     // Only check history if current message is truly ambiguous (very short, no clear indicators)
-    else if (sanitizedMessage.length < 15 && !hasStrongEnglish && !hasStrongUrdu && session.conversationHistory.length > 0) {
+    else if (sanitizedMessage.length < 15 && !hasUrduStructure && !hasUrduVerb && !hasEnglishQuestion && !hasEnglishStructure && session.conversationHistory.length > 0) {
       const historyLanguage = getLanguageFromHistory(session.conversationHistory);
       // Only use history if it's different and current is truly ambiguous
       if (historyLanguage !== detectedLanguage) {

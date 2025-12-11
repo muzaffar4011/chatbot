@@ -12,10 +12,10 @@ export function detectLanguage(message) {
 
   // Roman Urdu patterns (common words and structures)
   const romanUrduPatterns = [
-    /\b(hai|hain|ho|hoon|hoon|hain|hoga|hogi|honge)\b/i,
-    /\b(kya|ka|ki|ke|kaun|kis|kisi|kuch|kab|kahan|kaise|kyun)\b/i,
-    /\b(aap|tum|mera|meri|mere|hamara|hamari|hamare|tera|teri|tere)\b/i,
-    /\b(se|par|mein|ko|ne|ka|ki|ke|se|tak|bhi|bhi|to|ya|aur|lekin|magar)\b/i,
+    /\b(hai|hain|ho|hoon|hoon|hain|hoga|hogi|honge|hen)\b/i,
+    /\b(kya|ka|ki|ke|kaun|kaunsi|kaunse|kon|konsi|konse|kis|kisi|kuch|kab|kahan|kaise|kyun)\b/i,
+    /\b(aap|apke|apka|apki|apne|tum|mera|meri|mere|hamara|hamari|hamare|tera|teri|tere)\b/i,
+    /\b(se|par|mein|ko|ne|ka|ki|ke|se|tak|bhi|bhi|to|ya|aur|lekin|magar|pass)\b/i,
     /\b(chahta|chahti|chahte|karna|karni|karne|kar|kar|gaya|gayi|gaye|liya|liyi|liye)\b/i,
     /\b(zaroor|bilkul|shayad|yahan|wahan|abhi|pehle|baad|aaj|kal|parson)\b/i,
     /\b(na|nahi|nahin|mat|kabhi|hamesha|sabse|bahut|zyada|kam|accha|bura)\b/i,
@@ -76,6 +76,16 @@ export function detectLanguage(message) {
   const hasUrduVerb = /\b(hen|hain|hai|ho|hoon|hoga|hogi|honge)\b/i.test(text);
   
   // If sentence has Roman Urdu structure (apke/mera/hamara + kon/kaun + hen/hain), prioritize Urdu
+  // Check for "apke pass" or "apka" or "apki" + "kon/kaun" + "hen/hain"
+  const hasUrduPossessive = /\b(apke|apka|apki|apne|mera|meri|mere|hamara|hamari|hamare)\b/i.test(text);
+  const hasUrduQuestionWord = /\b(kaun|kaunsi|kaunse|kon|konsi|konse|kya|kahan|kaise)\b/i.test(text);
+  
+  // If has Urdu possessive + Urdu question word + Urdu verb, definitely Urdu
+  if (hasUrduPossessive && hasUrduQuestionWord && hasUrduVerb) {
+    return 'ur';
+  }
+  
+  // If has Urdu structure and Urdu verb, prioritize Urdu
   if (hasUrduStructure && (hasUrduVerb || urduScore >= 2)) {
     return 'ur';
   }
