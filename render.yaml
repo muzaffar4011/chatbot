@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: salon-rag-backend
+    env: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      # Add your other environment variables in Render dashboard:
+      # OPENROUTER_API_KEY
+      # OPENROUTER_BASE_URL
+      # QDRANT_URL
+      # QDRANT_API_KEY
+      # SALON_NAME
+      # SALON_LOCATION
+      # SALON_PHONE
+      # SALON_WHATSAPP
+      # FRONTEND_URL
+
