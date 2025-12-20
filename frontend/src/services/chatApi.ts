@@ -13,12 +13,17 @@ export interface ChatStreamEvent {
 export async function sendMessage(
   message: string,
   sessionId: string | null,
+  preferredLanguage: 'en' | 'ur',
   onToken: (token: string) => void,
   onSessionId: (id: string) => void,
   onError: (error: string) => void,
   onComplete: () => void
 ): Promise<void> {
   try {
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
     const response = await fetch(`${API_BASE_URL}/api/chat`, {
       method: 'POST',
       headers: {
@@ -27,11 +32,34 @@ export async function sendMessage(
       body: JSON.stringify({
         message,
         sessionId,
+        preferredLanguage, // Send preferred language to backend
       }),
+      signal: controller.signal,
+    }).catch((fetchError) => {
+      clearTimeout(timeoutId);
+      // Handle network errors
+      if (fetchError.name === 'AbortError') {
+        throw new Error('Request timeout. Please try again.');
+      }
+      if (fetchError.name === 'TypeError' && fetchError.message.includes('Failed to fetch')) {
+        throw new Error('Network error: Could not connect to server. Please check your connection.');
+      }
+      throw fetchError;
     });
 
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      // Try to get error message from response
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorData.message || errorMessage;
+      } catch {
+        // If response is not JSON, use status text
+        errorMessage = response.statusText || errorMessage;
+      }
+      throw new Error(errorMessage);
     }
 
     if (!response.body) {
@@ -123,7 +151,22 @@ export async function sendMessage(
     }
   } catch (error) {
     console.error('Error sending message:', error);
-    onError(error instanceof Error ? error.message : 'Failed to send message');
+    
+    // Provide user-friendly error messages
+    let errorMessage = 'Failed to send message';
+    if (error instanceof Error) {
+      if (error.message.includes('timeout')) {
+        errorMessage = 'Request timeout. The server is taking too long to respond.';
+      } else if (error.message.includes('Network error') || error.message.includes('Failed to fetch')) {
+        errorMessage = 'Network error: Could not connect to server. Please check if the backend is running.';
+      } else if (error.message.includes('Connection reset')) {
+        errorMessage = 'Connection was reset. Please try again.';
+      } else {
+        errorMessage = error.message;
+      }
+    }
+    
+    onError(errorMessage);
   }
 }
 

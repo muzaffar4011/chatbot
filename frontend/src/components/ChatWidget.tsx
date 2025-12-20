@@ -7,9 +7,11 @@ const ChatWidget = () => {
     messages, 
     sessionId, 
     isLoading, 
+    preferredLanguage,
     addMessage, 
     setSessionId, 
     setLoading,
+    setPreferredLanguage,
     clearMessages 
   } = useChatStore();
 
@@ -20,8 +22,20 @@ const ChatWidget = () => {
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Small delay to ensure DOM is updated
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, 100);
   }, [messages, currentResponse]);
+
+  // Scroll to bottom on initial load if messages exist
+  useEffect(() => {
+    if (messages.length > 0) {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+      }, 200);
+    }
+  }, []);
 
   // Focus input on mount
   useEffect(() => {
@@ -64,6 +78,7 @@ const ChatWidget = () => {
       await sendMessage(
         userMessage,
         sessionId,
+        preferredLanguage, // Pass preferred language
         // onToken
         (token: string) => {
           fullResponse += token;
@@ -134,20 +149,56 @@ const ChatWidget = () => {
             <p className="text-xs text-white/80">Always available</p>
           </div>
         </div>
-        <button
-          onClick={handleNewChat}
-          className="p-2 hover:bg-white/10 rounded-full transition-colors"
-          aria-label="New chat"
-          title="New chat"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Language Selector */}
+          <div className="flex items-center gap-1 bg-white/10 rounded-lg px-2 py-1">
+            <button
+              onClick={() => setPreferredLanguage('en')}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                preferredLanguage === 'en'
+                  ? 'bg-white text-[#075e54]'
+                  : 'text-white/80 hover:bg-white/20'
+              }`}
+              title="English"
+            >
+              EN
+            </button>
+            <button
+              onClick={() => setPreferredLanguage('ur')}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                preferredLanguage === 'ur'
+                  ? 'bg-white text-[#075e54]'
+                  : 'text-white/80 hover:bg-white/20'
+              }`}
+              title="Roman Urdu"
+            >
+              UR
+            </button>
+          </div>
+          <button
+            onClick={handleNewChat}
+            className="p-2 hover:bg-white/10 rounded-full transition-colors"
+            aria-label="New chat"
+            title="New chat"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Messages Area - Scrollable between header and input */}
-      <div className="flex-1 overflow-y-auto bg-[#efeae2] bg-[url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 viewBox=%220 0 60 60%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill=%22none%22 fill-rule=%22evenodd%22%3E%3Cg fill=%23d4d4d4%22 fill-opacity=%220.4%22%3E%3Cpath d=%22M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')]" style={{ paddingTop: '72px', paddingBottom: '120px' }}>
+      <div 
+        className="flex-1 overflow-y-auto bg-[#efeae2] bg-[url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 viewBox=%220 0 60 60%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill=%22none%22 fill-rule=%22evenodd%22%3E%3Cg fill=%23d4d4d4%22 fill-opacity=%220.4%22%3E%3Cpath d=%22M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')]" 
+        style={{ 
+          paddingTop: '72px', 
+          paddingBottom: '140px',
+          paddingLeft: 'env(safe-area-inset-left)',
+          paddingRight: 'env(safe-area-inset-right)',
+          minHeight: 'calc(100vh - 72px - 140px)'
+        }}
+      >
         <div className="min-h-full flex flex-col">
           {messages.length === 0 && !currentResponse && (
             <div className="flex-1 flex items-center justify-center px-4 py-6">
@@ -159,12 +210,16 @@ const ChatWidget = () => {
                 </div>
                 <h2 className="text-2xl font-semibold text-gray-700 mb-2">Welcome! 👋</h2>
                 <p className="text-gray-600 mb-4">I'm your Salon Assistant. Ask me anything about our services, pricing, or bookings!</p>
-                <p className="text-sm text-gray-500">You can ask in English or Roman Urdu</p>
+                <p className="text-sm text-gray-500">
+                  {preferredLanguage === 'en' 
+                    ? 'Chatting in English' 
+                    : 'Roman Urdu me baat kar rahe hain'}
+                </p>
               </div>
             </div>
           )}
 
-          <div className="max-w-4xl mx-auto w-full px-4 py-6 space-y-2">
+          <div className="max-w-4xl mx-auto w-full px-4 py-6 space-y-3">
           {messages.map((message) => (
             <div
               key={message.id}
@@ -229,13 +284,20 @@ const ChatWidget = () => {
             </div>
           )}
 
-          <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} style={{ minHeight: '20px' }} />
           </div>
         </div>
       </div>
 
       {/* Input Area - Fixed at bottom */}
-      <div className="fixed bottom-0 left-0 right-0 bg-[#f0f2f5] px-4 py-3 border-t border-gray-300 z-20 shadow-lg">
+      <div 
+        className="fixed bottom-0 left-0 right-0 bg-[#f0f2f5] px-4 py-3 border-t border-gray-300 z-20 shadow-lg"
+        style={{
+          paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))',
+          paddingLeft: 'calc(1rem + env(safe-area-inset-left))',
+          paddingRight: 'calc(1rem + env(safe-area-inset-right))'
+        }}
+      >
         <div className="max-w-4xl mx-auto">
           <div className="flex items-end gap-2 bg-white rounded-3xl px-4 py-2 shadow-sm border border-gray-200">
             <button
@@ -282,7 +344,9 @@ const ChatWidget = () => {
             )}
           </div>
           <p className="text-xs text-gray-500 text-center mt-2">
-            Powered by AI • Ask in English or Roman Urdu
+            Powered by AI • {preferredLanguage === 'en' 
+              ? 'Chatting in English' 
+              : 'Roman Urdu me baat kar rahe hain'}
           </p>
         </div>
       </div>

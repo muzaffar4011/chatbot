@@ -17,6 +17,11 @@ html, body, #root {
   left: 0;
   right: 0;
   bottom: 0;
+  /* Mobile viewport fix */
+  height: 100vh;
+  height: -webkit-fill-available;
+  /* Prevent iOS bounce */
+  overscroll-behavior: none;
 }
 
 body {

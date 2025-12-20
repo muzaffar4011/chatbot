@@ -1,9 +1,8 @@
 import express from 'express';
 import { detectLanguage, getLanguageFromHistory } from '../utils/language-detection.js';
-import { generateEmbedding } from '../services/embeddings.js';
-import { searchSimilar } from '../services/vector-db.js';
 import { generateStreamingResponse, buildSystemPrompt } from '../services/llm.js';
-import { expandQuery, detectIntent } from '../utils/query-expansion.js';
+import { SALON_KNOWLEDGE_BASE } from '../data/salonData.js';
+import { detectUserIntent, expandQueryWithIntent, getIntentGuidance } from '../utils/intent-understanding.js';
 
 export const chatRouter = express.Router();
 
@@ -28,7 +27,8 @@ function getSession(sessionId) {
     sessions.set(sessionId, {
       conversationHistory: [],
       lastActivity: Date.now(),
-      messageCount: 0
+      messageCount: 0,
+      preferredLanguage: 'en' // Default to English
     });
   }
   const session = sessions.get(sessionId);
@@ -41,7 +41,7 @@ function getSession(sessionId) {
  * Main chat endpoint with streaming support
  */
 chatRouter.post('/', async (req, res) => {
-  const { message, sessionId } = req.body;
+  const { message, sessionId, preferredLanguage } = req.body;
 
   if (!message || typeof message !== 'string' || message.trim().length === 0) {
     return res.status(400).json({ error: 'Message is required' });
@@ -49,6 +49,12 @@ chatRouter.post('/', async (req, res) => {
 
   const sid = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const session = getSession(sid);
+
+  // Update preferred language if provided
+  if (preferredLanguage === 'en' || preferredLanguage === 'ur') {
+    session.preferredLanguage = preferredLanguage;
+    console.log(`🌐 User preferred language set to: ${preferredLanguage}`);
+  }
 
   // Debug: Log session info
   console.log(`💬 Session: ${sid}, History length: ${session.conversationHistory.length}, Message: ${message.substring(0, 50)}...`);
@@ -66,40 +72,10 @@ chatRouter.post('/', async (req, res) => {
     // Sanitize input
     const sanitizedMessage = sanitizeInput(message.trim());
 
-    // Detect language - ALWAYS prioritize current message
-    let detectedLanguage = detectLanguage(sanitizedMessage);
-    
-    // Check for strong language indicators in current message
-    // Roman Urdu structure indicators (high priority)
-    const hasUrduStructure = /\b(apke|apka|apki|apne|mera|meri|mere|hamara|hamari|hamare|kaun|kaunsi|kaunse|kon|konsi|konse|mujhe|tumhe|hame)\b/i.test(sanitizedMessage);
-    const hasUrduVerb = /\b(hen|hain|hai|ho|hoon|hoga|hogi|honge|hota|hoti|hote)\b/i.test(sanitizedMessage);
-    const hasUrduQuestion = /\b(kya|kahan|kaise|kyun|kab|kis|kisi|kuch)\b/i.test(sanitizedMessage);
-    
-    // English structure indicators
-    const hasEnglishQuestion = /\b(which|what|where|who|why|how)\b/i.test(sanitizedMessage);
-    const hasEnglishStructure = /\b(you|your|provide|offers|is|are|do|does|have|has)\b/i.test(sanitizedMessage);
-    
-    // If Roman Urdu structure found (apke/mera + kon/kaun + hen/hain), prioritize Urdu
-    // This handles cases like "apke pass kon kon si services hen"
-    if ((hasUrduStructure || hasUrduQuestion) && (hasUrduVerb || hasUrduStructure)) {
-      detectedLanguage = 'ur';
-      console.log(`✅ Detected Roman Urdu structure: ${sanitizedMessage}`);
-    }
-    // If English question word + English structure (not Urdu structure), use English
-    else if (hasEnglishQuestion && hasEnglishStructure && !hasUrduStructure) {
-      detectedLanguage = 'en';
-      console.log(`✅ Detected English structure: ${sanitizedMessage}`);
-    }
-    // Only check history if current message is truly ambiguous (very short, no clear indicators)
-    else if (sanitizedMessage.length < 15 && !hasUrduStructure && !hasUrduVerb && !hasEnglishQuestion && !hasEnglishStructure && session.conversationHistory.length > 0) {
-      const historyLanguage = getLanguageFromHistory(session.conversationHistory);
-      // Only use history if it's different and current is truly ambiguous
-      if (historyLanguage !== detectedLanguage) {
-        detectedLanguage = historyLanguage;
-      }
-    }
-    
-    console.log(`🌐 Detected language: ${detectedLanguage} for query: "${sanitizedMessage.substring(0, 50)}"`);
+    // Use preferred language (always set, no auto-detect)
+    const detectedLanguage = session.preferredLanguage || 'en';
+    console.log(`✅ Using user preferred language: ${detectedLanguage}`);
+    console.log(`🌐 Final language: ${detectedLanguage} for query: "${sanitizedMessage.substring(0, 50)}"`);
 
     // Add user message to history
     session.conversationHistory.push({
@@ -107,106 +83,52 @@ chatRouter.post('/', async (req, res) => {
       content: sanitizedMessage
     });
 
-    // Expand query with synonyms and context for better search
-    const expandedQuery = expandQuery(sanitizedMessage, session.conversationHistory.slice(0, -1));
-    const detectedIntent = detectIntent(sanitizedMessage);
+    // Detect user intent for better understanding
+    const userIntent = detectUserIntent(sanitizedMessage, session.conversationHistory);
+    const intentGuidance = getIntentGuidance(userIntent);
     
-    console.log(`🔍 Original query: "${sanitizedMessage}"`);
-    console.log(`🔍 Expanded query: "${expandedQuery}"`);
-    console.log(`🎯 Detected intent: ${detectedIntent}`);
+    console.log(`🔍 Query: "${sanitizedMessage}"`);
+    console.log(`🌐 Language: ${detectedLanguage}`);
+    console.log(`🎯 Intent: ${userIntent}`);
+    console.log(`💡 Guidance: ${intentGuidance.substring(0, 80)}...`);
 
-    // Generate embedding for expanded query (better semantic matching)
-    let queryEmbedding;
-    try {
-      queryEmbedding = await generateEmbedding(expandedQuery);
-    } catch (error) {
-      console.error('Error generating embedding:', error);
-      const errorMessage = detectedLanguage === 'ur'
-        ? 'Maaf kijiye, technical issue ho gaya hai. Kya aap dobara try kar sakte hain?'
-        : 'Sorry, there was a technical issue. Could you please try again?';
-      return res.status(500).json({ error: errorMessage });
-    }
-
-    // Search vector database - get more results for better matching
-    // Increase limit to get more candidates, we'll filter and rank them
-    let searchResults;
-    try {
-      searchResults = await searchSimilar(queryEmbedding, 20); // Get top 20 for better matching
-    } catch (error) {
-      console.error('Error searching vector database:', error);
-      const errorMessage = detectedLanguage === 'ur'
-        ? 'Maaf kijiye, knowledge base access mein issue hai. Kya aap dobara try kar sakte hain?'
-        : 'Sorry, there was an issue accessing the knowledge base. Could you please try again?';
-      return res.status(500).json({ error: errorMessage });
-    }
-    
-    // Filter and rank results with very lenient threshold
-    // Qdrant returns similarity (0-1), we convert to distance (1 - similarity)
-    // Lower distance = better match
-    // Use very lenient threshold - accept results with similarity > 0.05 (distance < 0.95)
-    // This means even very weak matches are considered to avoid missing relevant info
-    const relevantChunks = searchResults
-      .filter(chunk => {
-        // Very lenient: accept if similarity > 0.05 (distance < 0.95)
-        // This means even very weak semantic matches are considered
-        const similarity = 1 - chunk.score;
-        return similarity > 0.05; // Accept even 5% similarity matches
-      })
-      .slice(0, 10); // Get top 10 chunks for maximum context coverage
-
-    // Calculate average similarity (higher is better)
-    // score is distance, so similarity = 1 - score
-    const avgSimilarity = relevantChunks.length > 0
-      ? relevantChunks.reduce((sum, c) => sum + (1 - c.score), 0) / relevantChunks.length
-      : 0;
-
-    // Debug logging
-    console.log(`📊 Search: ${searchResults.length} total, ${relevantChunks.length} relevant, Avg similarity: ${avgSimilarity.toFixed(3)}`);
-    
-    // If no relevant chunks found, try with even more lenient threshold
-    if (relevantChunks.length === 0 && searchResults.length > 0) {
-      console.log(`⚠️ No relevant chunks with threshold 0.1, using all top results`);
-      // Accept all results, even with very low similarity
-      const allChunks = searchResults.slice(0, 5);
-      relevantChunks.push(...allChunks);
-    }
-
-    // Build system prompt
-    const systemPrompt = buildSystemPrompt(
-      process.env.SALON_NAME || 'Premium Salon',
-      process.env.SALON_LOCATION || 'Karachi',
-      process.env.SALON_PHONE || '+92-300-1234567'
-    );
-
-    // Set up SSE headers
+    // Set up SSE headers BEFORE any processing
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no'); // Disable buffering
+    res.setHeader('Access-Control-Allow-Origin', '*'); // Allow CORS for SSE
 
-    // Send session ID
-    res.write(`data: ${JSON.stringify({ type: 'session', sessionId: sid })}\n\n`);
-
-    // Handle low confidence - be more lenient
-    // Only show fallback if we have NO results at all
-    // Even with low similarity, try to answer from available context
-    if (relevantChunks.length === 0) {
-      const fallbackMessage = detectedLanguage === 'ur'
-        ? `Mujhe yeh specific information nahi hai. Behtar hoga aap hamare number par call karein: ${process.env.SALON_PHONE || '+92-300-1234567'}`
-        : `I don't have that specific information. Please call us at ${process.env.SALON_PHONE || '+92-300-1234567'} for accurate details.`;
-      
-      res.write(`data: ${JSON.stringify({ type: 'token', content: fallbackMessage })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
-      res.end();
-      
-      session.conversationHistory.push({
-        role: 'assistant',
-        content: fallbackMessage
-      });
+    // Send session ID immediately
+    try {
+      res.write(`data: ${JSON.stringify({ type: 'session', sessionId: sid })}\n\n`);
+    } catch (writeError) {
+      console.error('Error writing session ID:', writeError);
       return;
     }
 
-    // Generate streaming response
+    // Build system prompt with hard-coded salon data and intent understanding
+    let systemPrompt;
+    try {
+      systemPrompt = buildSystemPrompt(
+        SALON_KNOWLEDGE_BASE,
+        detectedLanguage,
+        userIntent,
+        intentGuidance
+      );
+    } catch (error) {
+      console.error('Error building system prompt:', error);
+      const errorMessage = detectedLanguage === 'ur'
+        ? 'Maaf kijiye, kuch technical issue ho gaya hai. Kya aap dobara try kar sakte hain?'
+        : 'Sorry, there was a technical issue. Could you please try again?';
+      
+      res.write(`data: ${JSON.stringify({ type: 'error', message: errorMessage })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Generate streaming response using hard-coded data (no vector search needed)
     let fullResponse = '';
     try {
       for await (const token of generateStreamingResponse(
@@ -214,43 +136,78 @@ chatRouter.post('/', async (req, res) => {
         session.conversationHistory.slice(0, -1), // Exclude current user message
         sanitizedMessage,
         detectedLanguage,
-        relevantChunks
+        userIntent,
+        intentGuidance
       )) {
         fullResponse += token;
-        res.write(`data: ${JSON.stringify({ type: 'token', content: token })}\n\n`);
+        try {
+          res.write(`data: ${JSON.stringify({ type: 'token', content: token })}\n\n`);
+        } catch (writeError) {
+          console.error('Error writing token:', writeError);
+          // Client disconnected, stop streaming
+          break;
+        }
       }
 
       // Send completion signal
-      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
-      res.end();
+      try {
+        res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+        res.end();
+      } catch (endError) {
+        console.error('Error ending response:', endError);
+      }
 
       // Add assistant response to history
-      session.conversationHistory.push({
-        role: 'assistant',
-        content: fullResponse
-      });
+      if (fullResponse) {
+        session.conversationHistory.push({
+          role: 'assistant',
+          content: fullResponse
+        });
 
-      // Keep only last 10 message pairs
-      if (session.conversationHistory.length > 20) {
-        session.conversationHistory = session.conversationHistory.slice(-20);
+        // Keep only last 10 message pairs
+        if (session.conversationHistory.length > 20) {
+          session.conversationHistory = session.conversationHistory.slice(-20);
+        }
       }
 
     } catch (error) {
       console.error('Error in streaming response:', error);
+      console.error('Error stack:', error.stack);
       const errorMessage = detectedLanguage === 'ur'
         ? 'Maaf kijiye, kuch technical issue ho gaya hai. Kya aap dobara try kar sakte hain?'
         : 'Sorry, there was a technical issue. Could you please try again?';
       
-      res.write(`data: ${JSON.stringify({ type: 'error', message: errorMessage })}\n\n`);
-      res.end();
+      try {
+        res.write(`data: ${JSON.stringify({ type: 'error', message: errorMessage })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+        res.end();
+      } catch (endError) {
+        console.error('Error sending error response:', endError);
+      }
     }
 
   } catch (error) {
     console.error('Error in chat endpoint:', error);
-    res.status(500).json({ 
-      error: 'Internal server error',
-      message: error.message 
-    });
+    console.error('Error stack:', error.stack);
+    
+    // Check if headers already sent (SSE started)
+    if (res.headersSent) {
+      // Already started SSE, send error via SSE
+      try {
+        const errorMessage = 'Sorry, there was a technical issue. Could you please try again?';
+        res.write(`data: ${JSON.stringify({ type: 'error', message: errorMessage })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+        res.end();
+      } catch (endError) {
+        console.error('Error sending error response:', endError);
+      }
+    } else {
+      // Headers not sent yet, send JSON error
+      res.status(500).json({ 
+        error: 'Internal server error',
+        message: error.message 
+      });
+    }
   }
 });
 
